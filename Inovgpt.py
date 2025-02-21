@@ -12,7 +12,6 @@ import wave
 import shutil
 
 
-
 text = ""
 
 prev_prompt = """Voce será um especialista no assunto Inovfablab, impressoras 3d e cortadora a laser, 
