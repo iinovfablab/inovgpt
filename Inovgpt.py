@@ -1,3 +1,4 @@
+from time import time
 import ollama
 from kokoro import KPipeline
 import soundfile as sf
@@ -10,14 +11,14 @@ import random
 import pyaudio  
 import wave
 import shutil
+import speech_recognition as sr
 
-
-text = ""
+KEYWORDS = ["ceci", "seci", "sessi", "cessi"]
 
 prev_prompt = """Voce será um especialista no assunto Inovfablab, impressoras 3d e cortadora a laser, 
-            você sera armazenara as explicações toda vez que a palavra 'seci aprender' for chamada, você irá aprender, apenas com esta palavra.
+
             Você ira restringir perguntas com assunto de politica, futebol, matemática, programação
-            e tudo que nao for relacionado a inovfablab ou a impressoras 3d e cortadora a laser, 
+            e tudo que não for relacionado a inovfablab ou a impressoras 3d e cortadora a laser, 
             será respondido educadamente como 'Infelizmente não fui programada para responder ou ajudar com esses tipo de pergunta'.
 
             Cortadora laser: A cortadora laser, é uma CNC de 2 dimensões, utiliza um laser de CO2(gas carbonico) para fazer a remoção do material,
@@ -28,6 +29,15 @@ prev_prompt = """Voce será um especialista no assunto Inovfablab, impressoras 3
             no sentido anti-horario
 
             Impressoras 3D: O inovfablab possui 5 impressoras 3D, 3 finders, 1 Guider 2s e uma bambo x1-carbon, todas FDM.
+
+            O horário de funcionamento do inovfablab é das 08:00 da manhão até as 22:30 da noite, funcionando de segunda a sexta neste horarios,
+            aos sábados o horário é das 09:30h até as 12:30h, pois ninguem é de ferro né.
+
+            existem três funcionarios responsaveis que mantém a integridade do laboratório que são Ricardo que fica no horário da manhã e tarde, José que fica no horário da manhã e noite, 
+            sendo gerenciado pelo Responsavel Sergio Schina que fica a noite.
+
+            -Entenda-se que se a pessoa falar "i9", ela esta se referindo ao INOVFABLAB.
+            -Entenda-se que se a pessoa falar "inove fablab", ela esta se referindo ao INOVFABLAB
             """
 
 
@@ -54,14 +64,12 @@ async def generate_audio(text):
     pipeline = KPipeline(lang_code='p')
     generator = pipeline(
         text, voice='pf_dora',
-        speed=1
+        speed=1.2
     )
 
-    for i, (gs, ps, audio) in enumerate(generator):
+    for i, (_, _, audio) in enumerate(generator):
+        sf.write(f'{audio_path}'+'\\'+f'{i}.wav', audio, 24000)
 
-        sf.write(f'{audio_path}'+'\\'+f'{i}.wav', audio, 24000) # save each audio file
-    #path = os.listdir(os.path.abspath('.'))
-    #audio_file = list(filter(lambda x: x.endswith(".wav"), path))
 
 async def play():
 
@@ -110,6 +118,25 @@ def sound_duration(wav):
         duration = frames / float(rate)
         return duration
 
+def speech_text():
+    recognizer = sr.Recognizer()
+    with sr.Microphone() as source:
+        recognizer.adjust_for_ambient_noise(source)
+        audio = recognizer.listen(source, timeout=5)
+    
+    try:
+        text = recognizer.recognize_google(audio, language="pt-BR").lower()
+        print(text)
+        for word in KEYWORDS:
+
+            if word in text:
+                return text
+
+            else:
+                return "nada"
+    except:
+        return "nada"
+
 
 
 async def chaT(context):
@@ -118,15 +145,15 @@ async def chaT(context):
 
 
     chat = ""
-    print("chat")
-    while not chat.endswith("exit"):
+    while not chat.endswith("sair"):
 
-        c = random.choice([30,31,32,33,34,35,36,37,90,91,92,93,94,95,96,97])
-        b = random.choice([40,41,42,43,45,46,47,100,101,102,103,104,105,106,107])
-        text=""
-        chat = input("\nHumano>>: ")
+        text = ""
+        print("ouvindo...")
+        chat = speech_text()
+        if chat.endswith("nada"):
+            continue
+
         for part in ollama.generate(model="llama3.2:3B", prompt=chat, context=context,stream=True):    
-            #print(f'\033[92m'+f'\033[42m'+part['response']+'\033[97m', end='', flush=True)
             print(part['response'], end='', flush=True)
             text+=part['response']
 
@@ -136,10 +163,6 @@ async def chaT(context):
         await play()
         remove_wav_files()
 
-        #subprocess.Popen(["python", "sound.py"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-
-
-        
 
 async def main(context):
     task1 = asyncio.create_task(chaT(context))
@@ -155,5 +178,5 @@ if __name__ == "__main__":
 
     context = prev_generate(prev_prompt)
     asyncio.run(main(context))
-    #playsound("0.wav")
+
     
