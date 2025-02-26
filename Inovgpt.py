@@ -1,17 +1,18 @@
-from time import time
+
 import ollama
 from kokoro import KPipeline
 import soundfile as sf
 import os
-import subprocess
 import wave
 import contextlib
 import asyncio
-import random
 import pyaudio  
 import wave
 import shutil
 import speech_recognition as sr
+import torch
+import io
+import time
 
 KEYWORDS = ["ceci", "seci", "sessi", "cessi"]
 
@@ -36,14 +37,15 @@ prev_prompt = """Voce será um especialista no assunto Inovfablab, impressoras 3
             existem três funcionarios responsaveis que mantém a integridade do laboratório que são Ricardo que fica no horário da manhã e tarde, José que fica no horário da manhã e noite, 
             sendo gerenciado pelo Responsavel Sergio Schina que fica a noite.
 
-            -Entenda-se que se a pessoa falar "i9", ela esta se referindo ao INOVFABLAB.
-            -Entenda-se que se a pessoa falar "inove fablab", ela esta se referindo ao INOVFABLAB
+            quando alguem falar i9 ou inove, está se referindo a InovFablab.
+
+            
             """
 
 
 
 def prev_generate(prompt_):
-    output = ollama.generate(model="llama3.2:1B", prompt=prompt_,stream=True)
+    output = ollama.generate(model="llama3.2:3B", prompt=prompt_,stream=True)
     
     for chunk in output:
         if chunk['done'] == True:
@@ -57,18 +59,43 @@ async def generate_audio(text):
     local_path = os.path.abspath('.')
     audio_path = os.path.join(local_path, "audio_")
 
-    if not os.path.isdir("audio_"):
-        os.mkdir("audio_")
+    #if not os.path.isdir("audio_"):
+    #    os.mkdir("audio_")
     
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+
+    print(device)
     
-    pipeline = KPipeline(lang_code='p')
+    pipeline = KPipeline(lang_code='p',device=device)
     generator = pipeline(
         text, voice='pf_dora',
         speed=1.2
     )
+    chunk = 1024 
 
     for i, (_, _, audio) in enumerate(generator):
-        sf.write(f'{audio_path}'+'\\'+f'{i}.wav', audio, 24000)
+        #sf.write(f'{audio_path}'+'\\'+f'{i}.wav', audio, 24000)
+        
+        audio_int16 = (audio * 44200).to(torch.int16)  # Normaliza os valores
+        buff = io.BytesIO()
+        torch.save(audio_int16, buff)
+        buff.seek(0)
+        p = pyaudio.PyAudio()  
+
+        #f = wave.open(buff, "rb")
+
+        stream = p.open(format = pyaudio.paInt16,  
+                        channels = 1,  
+                        rate = 24000,  
+                        output = True) 
+
+
+        
+        stream.write(buff.read())
+
+        stream.stop_stream()
+        stream.close()
+    p.terminate()
 
 
 async def play():
@@ -79,9 +106,9 @@ async def play():
 
     chunk = 1024  
 
-    for x in os.listdir(audio_path):
+    for x in sorted(os.listdir(audio_path)):
         f = wave.open(audio_path+"\\"+x,"rb")  
-        print(audio_path+"\\"+x)
+        
         p = pyaudio.PyAudio()  
 
         stream = p.open(format = p.get_format_from_width(f.getsampwidth()),  
@@ -95,10 +122,11 @@ async def play():
             stream.write(data)  
             data = f.readframes(chunk)  
 
-        stream.stop_stream()  
-        stream.close()  
+        stream.stop_stream() 
+        stream.close()
+        
 
-        p.terminate() 
+    p.terminate() 
     
 
         
@@ -118,22 +146,29 @@ def sound_duration(wav):
         duration = frames / float(rate)
         return duration
 
-def speech_text():
+def speech_text(phase):
     recognizer = sr.Recognizer()
     with sr.Microphone() as source:
         recognizer.adjust_for_ambient_noise(source)
-        audio = recognizer.listen(source, timeout=5)
-    
+        audio = recognizer.listen(source)
+        
+        
     try:
-        text = recognizer.recognize_google(audio, language="pt-BR").lower()
-        print(text)
-        for word in KEYWORDS:
+        if phase == 1:
+            while True:
+                text = recognizer.recognize_google(audio, language="pt-BR").lower()
+                print(text)
+                for word in KEYWORDS:
 
-            if word in text:
-                return text
+                    if word in text:
+                        return "True"
 
-            else:
-                return "nada"
+                    else:
+                        return "False"
+        if phase == 2:
+
+            text = recognizer.recognize_google(audio, language="pt-BR")
+            return text
     except:
         return "nada"
 
@@ -145,12 +180,20 @@ async def chaT(context):
 
 
     chat = ""
+
     while not chat.endswith("sair"):
 
         text = ""
-        print("ouvindo...")
-        chat = speech_text()
-        if chat.endswith("nada"):
+        try:
+            if speech_text(1) == "True":
+                print('\a')
+                print("estou ouvindo...")
+                chat = speech_text(2)
+                print(chat)
+                
+            else:
+                continue
+        except:
             continue
 
         for part in ollama.generate(model="llama3.2:3B", prompt=chat, context=context,stream=True):    
@@ -160,8 +203,8 @@ async def chaT(context):
         
 
         await generate_audio(text)
-        await play()
-        remove_wav_files()
+        #await play()
+        #remove_wav_files()
 
 
 async def main(context):
